@@ -60,7 +60,8 @@ class VideoProcessor:
         return [{"h": even_h, "v": "1000k", "max": "1200k", "a": "128k"}]
 
     def transcode_hls(self):
-        hls_dir = self.output_dir
+        hls_dir = os.path.join(self.output_dir, "hls")
+        os.makedirs(hls_dir, exist_ok=True)
         master_path = os.path.join(hls_dir, "master.m3u8")
         renditions = self._renditions()
         has_audio = self._has_audio()

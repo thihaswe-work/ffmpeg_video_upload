@@ -19,6 +19,67 @@ Full-stack video streaming application with FastAPI backend, React + Vite fronte
 - Video list and HLS player with thumbnail preview
 - PostgreSQL database for video metadata
 
+---
+
+## Architecture
+
+![Architecture diagram](docs/architecture.svg)
+
+```
+Browser            Backend (FastAPI)                 Storage
+───────            ─────────────────                 ───────
+UploadPage ──1──▶  POST /api/videos/upload
+                        │ stream MP4 → temp disk
+                        │ insert row status="processing"
+                   ◀─2── 202 { id, status: "processing" }
+                        │
+                   ┌────▼─────────────────────────┐
+                   │ Background task              │
+                   │  FFmpeg: thumbnail @1s       │──4──▶ DigitalOcean Spaces
+                   │  FFmpeg: HLS 1080/720/480    │        videos/{id}/master.m3u8
+                   │  update status="completed"   │──5──▶  videos/{id}/thumbnail.jpg
+                   └──────────────────────────────┘
+                        │
+                   PostgreSQL  ◀──5── videos(id, thumbnail_key, manifest_key, status)
+
+VideoListPage ────────────────────▶ GET /api/videos/  (returns manifest_url + thumbnail_url)
+Player (hls.js) ───7──────────────▶ fetches master.m3u8 + thumbnail directly from Spaces
+```
+
+### Upload / processing flow (numbered)
+
+1. **Browser → Backend** — `UploadPage` sends the MP4 as `multipart/form-data` to `POST /api/videos/upload`.
+2. **Backend responds `202`** — the file is streamed to a temp dir in 8 MB chunks, a DB row is created with `status="processing"`, and the response returns immediately with `{ id, status }`. Transcoding has **not** happened yet.
+3. **Queue** — the request schedules `process_video` as a `BackgroundTask`.
+4. **FFmpeg + Spaces** — the background job extracts the thumbnail (`@1s`) and transcodes the HLS ladder, then uploads everything to `videos/{id}/` on Spaces (public-read).
+5. **DB update** — the row is updated with `thumbnail_key`, `manifest_key`, and `status="completed"` (or `"failed"` on error), and the temp dir is deleted.
+6. **Status** — `GET /api/videos/{id}` returns the current `status`.
+7. **Playback** — the player (hls.js) loads `master.m3u8` from Spaces and uses `thumbnail.jpg` as the poster.
+
+### Where the frontend "waits" (important)
+
+The frontend does **not** wait for transcoding, and it shouldn't:
+
+- The `await axios.post(...)` in `UploadPage` resolves when the **bytes finish uploading** to the backend — that's what the progress bar measures.
+- The backend returns `202` as soon as the file is on disk, so the HTTP request never times out on long transcodes.
+- The heavy work happens in the background; the UI just shows `processing` at first.
+
+So to see a video become playable, the frontend must **poll** `GET /api/videos/{id}` until `status === "completed"`. The current code fetches the list once on mount (`VideoListPage`), so a manual refresh is needed. To make it "sit and wait", poll:
+
+```js
+useEffect(() => {
+  if (!result?.id) return
+  const t = setInterval(async () => {
+    const { data } = await axios.get(`${API_URL}/api/videos/${result.id}`)
+    setResult(data)
+    if (data.status !== 'processing') clearInterval(t)
+  }, 3000)
+  return () => clearInterval(t)
+}, [result?.id])
+```
+
+---
+
 ## Prerequisites
 
 - Docker & Docker Compose (recommended)

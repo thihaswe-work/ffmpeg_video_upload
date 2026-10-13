@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import axios from 'axios'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -8,6 +9,22 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+  const pollRef = useRef(null)
+
+  useEffect(() => () => clearInterval(pollRef.current), [])
+
+  const pollStatus = (id) => {
+    pollRef.current = setInterval(async () => {
+      try {
+        const { data } = await axios.get(`${API_URL}/api/videos/${id}`)
+        setResult(data)
+        if (data.status !== 'processing') clearInterval(pollRef.current)
+      } catch (e) {
+        clearInterval(pollRef.current)
+      }
+    }, 3000)
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -18,18 +35,20 @@ export default function UploadPage() {
 
     setUploading(true)
     setProgress(0)
+    setResult(null)
+    setError(null)
     try {
       const response = await axios.post(`${API_URL}/api/videos/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (event) => {
-          const percent = Math.round((event.loaded * 100) / event.total)
-          setProgress(percent)
+          if (event.total) setProgress(Math.round((event.loaded * 100) / event.total))
         }
       })
       setResult(response.data)
-    } catch (error) {
-      console.error(error)
-      alert('Upload failed')
+      pollStatus(response.data.id)
+    } catch (err) {
+      console.error(err)
+      setError(err.response?.data?.detail || 'Upload failed')
     } finally {
       setUploading(false)
     }
@@ -53,6 +72,7 @@ export default function UploadPage() {
           {uploading ? 'Uploading...' : 'Upload'}
         </button>
       </form>
+
       {uploading && (
         <div className="mt-4">
           <div className="bg-gray-200 rounded-full h-2.5">
@@ -61,10 +81,29 @@ export default function UploadPage() {
           <p className="text-sm mt-2">{progress}%</p>
         </div>
       )}
+
+      {error && <p className="mt-4 text-red-600 text-sm">{error}</p>}
+
       {result && (
         <div className="mt-6 bg-green-50 p-4 rounded-lg">
-          <h2 className="text-lg font-semibold text-green-800">Upload Successful!</h2>
-          <p className="text-sm text-green-700">Video ID: {result.id}</p>
+          {result.status === 'processing' && (
+            <>
+              <h2 className="text-lg font-semibold text-green-800">Upload complete — processing…</h2>
+              <p className="text-sm text-green-700">Transcoding to HLS. This page will update automatically.</p>
+            </>
+          )}
+          {result.status === 'completed' && (
+            <>
+              <h2 className="text-lg font-semibold text-green-800">Video ready!</h2>
+              <Link to={`/videos/${result.id}`} className="text-sm text-blue-600 underline">
+                Watch now
+              </Link>
+            </>
+          )}
+          {result.status === 'failed' && (
+            <h2 className="text-lg font-semibold text-red-800">Processing failed. Check the backend logs.</h2>
+          )}
+          <p className="text-xs text-gray-500 mt-2">Video ID: {result.id}</p>
         </div>
       )}
     </div>
