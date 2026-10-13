@@ -94,7 +94,7 @@ Docker ports are intentionally different from common defaults to avoid conflicts
 | Service | Docker Host Port | Internal Port |
 |---|---|---|
 | Backend | 8001 | 8000 |
-| Frontend | 5174 | 5174 |
+| Frontend | 5174 | 5173 |
 | PostgreSQL | 5433 | 5432 |
 
 ### 1. Configure environment variables
