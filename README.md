@@ -83,7 +83,7 @@ useEffect(() => {
 ## Prerequisites
 
 - Docker & Docker Compose (recommended)
-- Or: Python 3.11+, Node.js 20+, PostgreSQL, FFmpeg installed locally
+- Or: Python 3.9+, Node.js 18+, PostgreSQL, FFmpeg installed locally
 
 ---
 
@@ -107,8 +107,10 @@ cp backend/.env.example backend/.env
 ### 2. Run all services
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
+
+> Older Docker installs use the hyphenated `docker-compose` instead. Both work with these files.
 
 Frontend: http://localhost:5174  
 Backend API: http://localhost:8001  
@@ -118,12 +120,12 @@ API Docs: http://localhost:8001/docs
 
 Backend only:
 ```bash
-docker-compose -f docker-compose.backend.yml up --build
+docker compose -f docker-compose.backend.yml up --build
 ```
 
 Frontend only:
 ```bash
-docker-compose -f docker-compose.frontend.yml up --build
+docker compose -f docker-compose.frontend.yml up --build
 ```
 
 ---
@@ -132,8 +134,11 @@ docker-compose -f docker-compose.frontend.yml up --build
 
 ### Backend Setup
 
-1. Ensure PostgreSQL is running (default port 5432)
-2. Install FFmpeg locally
+1. Ensure PostgreSQL is running (default port 5432) and create the database:
+```bash
+createdb my_video_app
+```
+2. Install FFmpeg locally (e.g. `brew install ffmpeg` on macOS).
 3. Configure `.env`:
 ```bash
 cd backend
@@ -142,12 +147,14 @@ cp .env.example .env
 ```
 4. Install dependencies:
 ```bash
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
 5. Run server:
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+> If `uvicorn`/`pip` are not on your PATH, always invoke them as Python modules with `python3 -m ...` (as above).
 
 ### Frontend Setup
 
@@ -198,6 +205,30 @@ Practical notes:
 - **Job durability**: `BackgroundTasks` do not survive a server restart. For production, use a real queue (Celery + Redis, or RQ) and a worker container.
 - **Reverse proxy**: if put behind nginx, raise `client_max_body_size` (e.g. `client_max_body_size 4g;`) and proxies read timeouts. Uvicorn/FastAPI itself imposes no body-size limit.
 - **Renderings**: renditions are chosen based on the source height (no upscaling). A 1080p source produces 1080p/720p/480p adaptive variants.
+
+---
+
+## DigitalOcean Spaces CORS (required for playback)
+
+The browser fetches `master.m3u8` and `.ts` segments directly from Spaces, which is a
+**cross-origin** request. The bucket must return CORS headers or hls.js will be blocked.
+
+Add a CORS policy to the bucket (Spaces → bucket → Settings → CORS), allowing your
+frontend origin:
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:5173", "http://localhost:5174", "https://your-frontend.com"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3000
+  }
+]
+```
+
+Also make sure the objects are uploaded with public-read access (the backend does this via
+`ExtraArgs={'ACL': 'public-read'}`).
 
 ---
 
